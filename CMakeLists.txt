@@ -22,7 +22,7 @@ set(LIBRARIES
 )
 
 set(SOURCE_FILES main.cpp)
-add_executable(ObjectFinder ${SOURCE_FILES} common.h IPointCloudDivider.h ProjectionDivider.cpp ProjectionDivider.h pointcloudUtilities.h pointcloudUtilities.cpp)
+add_executable(ObjectFinder ${SOURCE_FILES} common.h IPointCloudDivider.h ProjectionDivider.cpp ProjectionDivider.h pointcloudUtilities.h pointcloudUtilities.cpp KinectParameters.h KinectParameters.cpp ImageRebuild.h ImageRebuild.cpp)
 
 target_link_libraries(ObjectFinder
 ${OpenCV_LIBS}
