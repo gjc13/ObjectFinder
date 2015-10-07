@@ -8,6 +8,7 @@
 #include <vector>
 #include "common.h"
 
+
 class IPointCloudDivider
 {
 public:

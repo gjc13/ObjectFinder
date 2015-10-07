@@ -30,9 +30,9 @@ cv::Mat get2DImageFromPointCloud(PointCloudPtr cloud)
     {
         for (int j = 0; j < rebuiltImage.cols; j++)
         {
-            rebuiltImage.at<cv::Vec3b>(i, j)[0] = 255;
-            rebuiltImage.at<cv::Vec3b>(i, j)[1] = 255;
-            rebuiltImage.at<cv::Vec3b>(i, j)[2] = 255;
+            rebuiltImage.at<cv::Vec3b>(i, j)[0] = 0;
+            rebuiltImage.at<cv::Vec3b>(i, j)[1] = 0;
+            rebuiltImage.at<cv::Vec3b>(i, j)[2] = 0;
         }
     }
     int minPixelX = INT32_MAX, maxPixelX = -1;
@@ -42,12 +42,12 @@ cv::Mat get2DImageFromPointCloud(PointCloudPtr cloud)
         PixelNumber pxNumber = getPixelNumber(point, projectionParameter);
         if(pxNumber.nx >= lowResWidth || pxNumber.nx < 0)
         {
-            cerr << pxNumber.nx << " " << pxNumber.ny << endl;
+//            cerr << pxNumber.nx << " " << pxNumber.ny << endl;
             continue;
         }
         if(pxNumber.ny >= lowResHeight || pxNumber.nx < 0)
         {
-            cerr << pxNumber.nx << " " << pxNumber.ny << endl;
+//            cerr << pxNumber.nx << " " << pxNumber.ny << endl;
             continue;
         }
         cv::Vec3b &pixel = rebuiltImage.at<cv::Vec3b>(pxNumber.ny, pxNumber.nx);
@@ -59,10 +59,10 @@ cv::Mat get2DImageFromPointCloud(PointCloudPtr cloud)
         if (pxNumber.ny > maxPixelY) maxPixelY = pxNumber.ny;
         if (pxNumber.ny < minPixelY) minPixelY = pxNumber.ny;
     }
-    cout << minPixelX << " " << maxPixelX << " " << minPixelY << " " << maxPixelY << endl;
+    if(maxPixelX < 0 || minPixelX < 0) return cv::Mat();
     return cv::Mat(rebuiltImage,
-                   cv::Range(minPixelY, maxPixelY + 1),
-                   cv::Range(minPixelX, maxPixelX + 1));
+                   cv::Range(minPixelY, maxPixelY+1),
+                   cv::Range(minPixelX, maxPixelX+1));
 }
 
 cv::Mat getHDImageFromPointCloud(PointCloudPtr cloud, cv::Mat &totalImage)
@@ -77,14 +77,14 @@ cv::Mat getHDImageFromPointCloud(PointCloudPtr cloud, cv::Mat &totalImage)
         if (pxNumber.ny > maxPixelY) maxPixelY = pxNumber.ny;
         if (pxNumber.ny < minPixelY) minPixelY = pxNumber.ny;
     }
-    if(minPixelX < 0 || maxPixelX >= totalImage.cols ||
-            minPixelY < 0 || maxPixelY >= totalImage.rows)
+    if(minPixelX < 0 || maxPixelX >= totalImage.cols || maxPixelX < 0 ||
+            minPixelY < 0 || maxPixelY >= totalImage.rows || maxPixelY < 0)
     {
         return cv::Mat();
     }
     return cv::Mat(totalImage,
-                   cv::Range(minPixelY, maxPixelY + 1),
-                   cv::Range(minPixelX, maxPixelX + 1));
+                   cv::Range(minPixelY, maxPixelY+1),
+                   cv::Range(minPixelX, maxPixelX+1));
 }
 
 PixelNumber getPixelNumber(const pcl::PointXYZRGB &point, double projectionMat[3][4])

@@ -10,105 +10,137 @@
 #include <pcl/segmentation/sac_segmentation.h>
 #include <pcl/segmentation/extract_clusters.h>
 #include <pcl/filters/extract_indices.h>
+#include <pcl/segmentation/region_growing_rgb.h>
+#include <pcl/search/kdtree.h>
+#include <pcl/search/search.h>
 #include <map>
+
+#include <set>
+#include <algorithm>
+
+#include "pointcloudUtilities.h"
 
 using namespace std;
 
 
 ProjectionDivider::ProjectionDivider(PointCloudPtr pointCloud, int minNumPoints)
-        : originalCloud(pointCloud),
+        : originalCloud(pointCloud), yMin(0),
           minDividedNumPoints(minNumPoints)
 {
-    filteredCloud = removeBigPlanes(originalCloud, 0.3, 2, 5);
-    calculateDensity();
-    filterDensity();
-    saveDensity();
+    filteredCloud = removeBigPlanes(originalCloud, 0.2, 2, 5);
 }
 
 std::vector<PointCloudPtr> ProjectionDivider::getDividedPointClouds()
 {
-    vector<pair<int, int>> xDividePositions = getDividePositions(xDensity);
-    vector<pair<int, int>> yDividePositions = getDividePositions(yDensity);
-    vector<pair<int, int>> zDividePositions = getDividePositions(zDensity);
-    auto addMin = [](double min, vector<pair<int, int>> &dividePositions) -> void {
-        for (pair<int, int> &posPair:dividePositions)
-        {
-            posPair.first += min;
-            posPair.second += min;
-        }
-    };
-    addMin(xMin, xDividePositions);
-    addMin(yMin, yDividePositions);
-    addMin(zMin, zDividePositions);
-    map<GridInfo, PointCloudPtr> gridPointClouds;
-    auto getDivideIndex = [](double position, const vector<pair<int, int>> &dividePositions) -> int {
-        int begin = 0, end = (int) dividePositions.size() - 1;
-        while (begin <= end)
-        {
-            int mid = (begin + end) / 2;
-            //divide start at pair first, end at pair second
-            if (position >= dividePositions[mid].first && position <= dividePositions[mid].second)
-                return mid;
-            if (position <= dividePositions[mid].first)
-                end = mid - 1;
-            else
-                begin = mid + 1;
-        }
-        return -1;
-    };
-    for (pcl::PointXYZRGB point: filteredCloud->points)
-    {
-        int xDivideIndex = getDivideIndex(point.x, xDividePositions);
-        if (xDivideIndex < 0) continue;
-        int yDivideIndex = getDivideIndex(point.y, yDividePositions);
-        if (yDivideIndex < 0) continue;
-        int zDivideIndex = getDivideIndex(point.z, zDividePositions);
-        if (zDivideIndex < 0) continue;
-        GridInfo gridInfo(xDivideIndex, yDivideIndex, zDivideIndex);
-        if (gridPointClouds.find(gridInfo) == gridPointClouds.end())
-        {
-            gridPointClouds[gridInfo] = PointCloudPtr(new pcl::PointCloud<pcl::PointXYZRGB>());
-        }
-        gridPointClouds[gridInfo]->points.push_back(point);
-    }
+    vector<Hill> yDividePositions;
     vector<PointCloudPtr> dividedPointClouds;
-    for (pair<GridInfo, PointCloudPtr> infoCloudPair : gridPointClouds)
+    vector<PointCloudPtr> yDividedClouds = yDivide(yDividePositions);
+
+    cout << "yPositions:" << endl;
+    for (const Hill &hill:yDividePositions)
     {
-        if ((int) infoCloudPair.second->points.size() < minDividedNumPoints) continue;
-        infoCloudPair.second->width = (int) infoCloudPair.second->points.size();
-        infoCloudPair.second->height = 1;
-        dividedPointClouds.push_back(infoCloudPair.second);
+        cout << hill.from << " " << hill.to << endl;
+    }
+
+//    int check;
+//    cin >> check;
+////    rgbVis(yDividedClouds[i]);
+//    cout << endl;
+
+    for (int i = 0; i < (unsigned) yDividePositions.size(); i++)
+    {
+        PointCloudPtr yDividedCloud = yDividedClouds[i];
+
+        if (yDividedCloud == nullptr) continue;
+        int xMin, zMin;
+        cv::Mat xDensity = calculateDensity(0, xMin);
+        cv::GaussianBlur(xDensity, xDensity, cv::Size(0, 0), 1);
+        cv::Mat zDensity = calculateDensity(2, zMin);
+        cv::GaussianBlur(zDensity, zDensity, cv::Size(0, 0), 2);
+        vector<Hill> xDividePositions = getDividePositions(xDensity, 0.4, 0.05);
+        vector<Hill> zDividePositions = getDividePositions(zDensity);
+
+        addMin(xMin, xDividePositions);
+        addMin(zMin, zDividePositions);
+
+        cout << "xPositions:" << endl;
+        for (const Hill &hill:xDividePositions)
+        {
+            cout << hill.from << " " << hill.to << endl;
+        }
+
+        cout << "zPositions:" << endl;
+        for (const Hill &hill:zDividePositions)
+        {
+            cout << hill.from << " " << hill.to << endl;
+        }
+
+//        char buf[500];
+//        sprintf(buf, "/Users/gjc13/KinectData/xDensity%d.txt", i);
+//        saveDensity(buf, xDensity);
+//        if (i == check)
+//        {
+//            getDividePositions(xDensity, 0.3, 0.05);
+//            int xFrom, xTo;
+//            cin >> xFrom >> xTo;
+//            rgbVis(getSubXCloud(yDividedCloud, xFrom + xMin, xTo + xMin));
+//        }
+
+
+        cout << i << " " << yDividePositions[i].from << " " << yDividePositions[i].to << endl;
+        cout << endl;
+
+        map<GridInfo, PointCloudPtr> gridPointClouds;
+        for (pcl::PointXYZRGB point: yDividedCloud->points)
+        {
+            int yDivideIndex = i;
+            int zDivideIndex = getDivideIndex(point.z, zDividePositions);
+            if (zDivideIndex < 0) continue;
+            for (int j = 0; j < (int) xDividePositions.size(); j++)
+            {
+                if (point.x > xDividePositions[j].to || point.x < xDividePositions[j].from) continue;
+                GridInfo gridInfo(j, yDivideIndex, zDivideIndex);
+                if (gridPointClouds.find(gridInfo) == gridPointClouds.end())
+                {
+                    gridPointClouds[gridInfo] = PointCloudPtr(new pcl::PointCloud<pcl::PointXYZRGB>());
+                }
+                gridPointClouds[gridInfo]->points.push_back(point);
+            }
+        }
+//    GridInfo info(3, 2, 1);
+//    rgbVis(gridPointClouds[info]);
+        for (pair<GridInfo, PointCloudPtr> infoCloudPair : gridPointClouds)
+        {
+            cout << "grid:" << endl;
+            cout << "x:" << infoCloudPair.first.indexX << " " << xDividePositions[infoCloudPair.first.indexX].from
+            << " " << xDividePositions[infoCloudPair.first.indexX].to << endl;
+            cout << "y:" << infoCloudPair.first.indexY << " " << yDividePositions[infoCloudPair.first.indexY].from
+            << " " << yDividePositions[infoCloudPair.first.indexY].to << endl;
+            cout << "z:" << infoCloudPair.first.indexZ << " " << zDividePositions[infoCloudPair.first.indexZ].from
+            << " " << zDividePositions[infoCloudPair.first.indexZ].to << endl;
+            cout << "numPoints" << infoCloudPair.second->points.size() << endl;
+            if ((int) infoCloudPair.second->points.size() < minDividedNumPoints) continue;
+            infoCloudPair.second->width = (int) infoCloudPair.second->points.size();
+            infoCloudPair.second->height = 1;
+            dividedPointClouds.push_back(infoCloudPair.second);
+        }
     }
     return dividedPointClouds;
 }
 
-void ProjectionDivider::saveDensity()
+void ProjectionDivider::saveDensity(string filename, cv::Mat density)
 {
-    ofstream fout("/Users/gjc13/ClionProjects/KinectToPCL/xdensity_d.txt");
-    for (int i = 0; i < xDensity.cols; i++)
+    ofstream fout(filename);
+    for (int i = 0; i < density.cols; i++)
     {
-        fout << xDensity.at<double>(i) << endl;
-    }
-    fout.close();
-    fout.open("/Users/gjc13/ClionProjects/KinectToPCL/ydensity_d.txt");
-    for (int i = 0; i < yDensity.cols; i++)
-    {
-        fout << yDensity.at<double>(i) << endl;
-    }
-    fout.close();
-    fout.open("/Users/gjc13/ClionProjects/KinectToPCL/zdensity_d.txt");
-    for (int i = 0; i < zDensity.cols; i++)
-    {
-        fout << zDensity.at<double>(i) << endl;
+        fout << density.at<double>(i) << endl;
     }
     fout.close();
 }
 
-void ProjectionDivider::calculateDensity()
+cv::Mat ProjectionDivider::calculateDensity(int projectionIndex, int &min)
 {
-    xMin = INT32_MAX;
-    yMin = INT32_MAX;
-    zMin = INT32_MAX;
+    min = INT32_MAX;
     auto removePendingZeros = [](int *numPoints, cv::Mat &density) -> void {
         int end = 1000;
         while (end > 0 && numPoints[end - 1] == 0) end--;
@@ -118,46 +150,80 @@ void ProjectionDivider::calculateDensity()
             density.at<double>(i) = numPoints[i];
         }
     };
-    int xNumPoints[1000], yNumPoints[1000], zNumPoints[1000];
+    int numPoints[1000];
     for (int i = 0; i < 1000; i++)
     {
-        xNumPoints[i] = 0;
-        yNumPoints[i] = 0;
-        zNumPoints[i] = 0;
+        numPoints[i] = 0;
     }
     for (pcl::PointXYZRGB point:filteredCloud->points)
     {
-        if (point.x < xMin) xMin = point.x;
-        if (point.y < yMin) yMin = point.y;
-        if (point.z < zMin) zMin = point.z;
+        if (point.data[projectionIndex] < min)
+            min = (int) point.data[projectionIndex] - 1;
     }
     for (pcl::PointXYZRGB point:filteredCloud->points)
     {
-        int x = (int) (point.x - xMin);
-        int y = (int) (point.y - yMin);
-        int z = (int) (point.z - zMin);
-        if (x > 1000 || y > 1000 || z > 1000) continue;
-        xNumPoints[x]++;
-        yNumPoints[y]++;
-        zNumPoints[z]++;
+        int distance = (int) (point.data[projectionIndex] - min);
+        if (distance >= 1000) continue;
+        numPoints[distance]++;
     }
-
-    removePendingZeros(xNumPoints, xDensity);
-    removePendingZeros(yNumPoints, yDensity);
-    removePendingZeros(zNumPoints, zDensity);
+    cv::Mat density;
+    removePendingZeros(numPoints, density);
+    return density;
 }
 
-void ProjectionDivider::filterDensity()
+std::vector<ProjectionDivider::Hill> ProjectionDivider::getDividePositions(cv::Mat density,
+                                                                           double window_scale, double step_scale,
+                                                                           double minWidth)
 {
-    cv::GaussianBlur(xDensity, xDensity, cv::Size(0, 0), 1);
-    cv::GaussianBlur(yDensity, yDensity, cv::Size(0, 0), 2);
-    cv::GaussianBlur(zDensity, zDensity, cv::Size(0, 0), 2);
+    set<Hill> hills;
+    int windowLength = (int) (density.cols * window_scale);
+    int stepLength = (int) (density.cols * step_scale);
+    stepLength = stepLength == 0 ? 1 : stepLength;
+    int start = 0;
+    while (start + windowLength <= density.cols)
+    {
+        cv::Mat windowDensity(density, cv::Range::all(), cv::Range(start, start + windowLength));
+        for (Hill &hill: getDividePositions(windowDensity))
+        {
+            hill.to += start;
+            hill.from += start;
+            hills.insert(hill);
+        }
+        start += stepLength;
+    }
+    vector<Hill> vecHills;
+    for (const Hill &hill: hills)
+    {
+        vecHills.push_back(hill);
+    }
+    sort(vecHills.begin(), vecHills.end(), [](const Hill &lhs, const Hill &rhs) -> bool {
+        return (lhs.to - lhs.from) < (rhs.to - rhs.from);
+    });
+    vector<Hill> finalHills;
+    cout << "final Hills:" << endl;
+    for (int i = 0; i < (int) hills.size(); i++)
+    {
+        if (vecHills[i].to - vecHills[i].from < minWidth) continue;
+        bool isContained = false;
+        for (int j = i + 1; j < (int) hills.size(); j++)
+        {
+            isContained = (vecHills[i].from >= vecHills[j].from && vecHills[i].to <= vecHills[j].to);
+            if (isContained) break;
+        }
+        if (!isContained)
+        {
+            cout << vecHills[i].from << " " << vecHills[i].to << endl;
+            finalHills.push_back(vecHills[i]);
+        }
+    }
+    cout << endl;
+    return finalHills;
 }
 
-vector<pair<int, int>> ProjectionDivider::getDividePositions(cv::Mat density)
+vector<ProjectionDivider::Hill> ProjectionDivider::getDividePositions(cv::Mat density)
 {
     vector<int> minPoints = getMinPoints(density);
-    vector<pair<int, int>> dividePositions;
+    vector<Hill> dividePositions;
     pair<double, double> totalMaxMin = getMaxMin(density, 0, density.cols);
     double range = totalMaxMin.first - totalMaxMin.second;
     int hillStart;
@@ -171,7 +237,11 @@ vector<pair<int, int>> ProjectionDivider::getDividePositions(cv::Mat density)
         hillRange = hillMaxMin.first - hillMaxMin.second;
         if (hillRange > range / 20)
         {
-            dividePositions.push_back(pair<int, int>(hillStart, hillEnd));
+            dividePositions.push_back(Hill(hillStart, hillEnd));
+        }
+        else
+        {
+//            cout << "Dropped hill: (" << hillStart << "," << hillEnd << ")" << endl;
         }
     }
     return dividePositions;
@@ -276,7 +346,7 @@ PointCloudPtr ProjectionDivider::removeBigPlanes(PointCloudPtr cloud, double siz
             timeUnfound++;
             continue;
         }
-
+        cout << "plane removed" << endl;
         pcl::ExtractIndices<pcl::PointXYZRGB> extract;
         extract.setInputCloud(filteredCloud);
         extract.setIndices(inliers);
@@ -286,6 +356,38 @@ PointCloudPtr ProjectionDivider::removeBigPlanes(PointCloudPtr cloud, double siz
         filteredCloud = cuttedCloud;
     }
     return filteredCloud;
+}
+
+
+PointCloudPtr ProjectionDivider::removeColorRegion(PointCloudPtr cloud,
+                                                   double sizeThreshold,
+                                                   double distanceThreshold,
+                                                   double colorThreshold)
+{
+    pcl::search::Search<pcl::PointXYZRGB>::Ptr tree(
+            new pcl::search::KdTree<pcl::PointXYZRGB>);
+    PointCloudPtr cuttedCloud(new pcl::PointCloud<pcl::PointXYZRGB>());
+    pcl::RegionGrowingRGB<pcl::PointXYZRGB> rgbGrower;
+    rgbGrower.setInputCloud(cloud);
+    rgbGrower.setSearchMethod(tree);
+    rgbGrower.setDistanceThreshold((float) distanceThreshold);
+    rgbGrower.setPointColorThreshold((float) colorThreshold);
+    rgbGrower.setRegionColorThreshold(0);
+    rgbGrower.setMinClusterSize((int) (cloud->size() * sizeThreshold));
+    std::vector<pcl::PointIndices> clusters;
+    rgbGrower.extract(clusters);
+    pcl::ExtractIndices<pcl::PointXYZRGB> extract;
+    for (pcl::PointIndices &indices: clusters)
+    {
+        cout << indices.indices.size();
+        pcl::PointIndicesPtr indicesPtr(new pcl::PointIndices(indices));
+        extract.setInputCloud(cloud);
+        extract.setIndices(indicesPtr);
+        extract.setNegative(true);
+        extract.filter(*cuttedCloud);
+        cloud = cuttedCloud;
+    }
+    return cloud;
 }
 
 pair<double, double> ProjectionDivider::getMaxMin(cv::Mat density, int from, int to)
@@ -298,4 +400,62 @@ pair<double, double> ProjectionDivider::getMaxMin(cv::Mat density, int from, int
         if (density.at<double>(j) < min) min = density.at<double>(j);
     }
     return pair<double, double>(max, min);
+}
+
+int ProjectionDivider::getDivideIndex(double position, const std::vector<Hill> &dividePositions)
+{
+    int begin = 0, end = (int) dividePositions.size() - 1;
+    while (begin <= end)
+    {
+        int mid = (begin + end) / 2;
+        //divide start at pair first, end at pair second
+        if (position >= dividePositions[mid].from && position <= dividePositions[mid].to)
+            return mid;
+        if (position <= dividePositions[mid].from)
+            end = mid - 1;
+        else
+            begin = mid + 1;
+    }
+    return -1;
+}
+
+std::vector<PointCloudPtr> ProjectionDivider::yDivide(vector<Hill> &yDividePositions)
+{
+    cv::Mat yDensity = calculateDensity(1, yMin);
+    cv::GaussianBlur(yDensity, yDensity, cv::Size(0, 0), 2);
+    yDividePositions = getDividePositions(yDensity);
+    vector<PointCloudPtr> dividedClouds(yDividePositions.size());
+    for (PointCloudPtr &cloudPtr: dividedClouds)
+    {
+        cloudPtr = nullptr;
+    }
+    addMin(yMin, yDividePositions);
+    for (pcl::PointXYZRGB point: filteredCloud->points)
+    {
+        int yDivideIndex = getDivideIndex(point.y, yDividePositions);
+        if (yDivideIndex < 0) continue;
+        if (dividedClouds[yDivideIndex] == nullptr)
+        {
+            dividedClouds[yDivideIndex] = PointCloudPtr(new pcl::PointCloud<pcl::PointXYZRGB>());
+        }
+        dividedClouds[yDivideIndex]->points.push_back(point);
+    }
+    for (PointCloudPtr cloudPtr: dividedClouds)
+    {
+        if (cloudPtr != nullptr)
+        {
+            cloudPtr->width = (int) cloudPtr->points.size();
+            cloudPtr->height = 1;
+        }
+    }
+    return dividedClouds;
+}
+
+void ProjectionDivider::addMin(double min, std::vector<Hill> &dividePositions)
+{
+    for (Hill &hill:dividePositions)
+    {
+        hill.from += min;
+        hill.to += min;
+    }
 }
